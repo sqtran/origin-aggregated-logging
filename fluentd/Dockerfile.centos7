@@ -39,6 +39,7 @@ RUN mkdir -p ${HOME} && \
       fluent-plugin-secure-forward \
      'fluent-plugin-systemd:<0.1.0' \
       fluent-plugin-viaq_data_model \
+      fluent-plugin-remote-syslog \
       systemd-journal
 
 ADD configs.d/ /etc/fluent/configs.d/
