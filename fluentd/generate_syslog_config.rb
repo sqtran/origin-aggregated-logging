@@ -9,6 +9,7 @@ def init_environment_vars()
   @env_vars = [
     ['HOST', 'remote_syslog', nil],
     ['PORT', 'port', nil], 
+    ['HOSTNAME', 'hostname', ENV['HOSTNAME']], 
     ['REMOVE_TAG_PREFIX', 'remove_tag_prefix', nil],
     ['TAG_KEY', 'tag_key', nil],
     ['FACILITY', 'facility', nil], 
@@ -18,7 +19,7 @@ def init_environment_vars()
   ]
 
   @env_vars.each { |r| 
-    r[2] = ENV[prefix + r[0]]
+    r[2] = ENV[prefix + r[0]] unless !ENV[prefix + r[0]]
   }
 end
 
@@ -32,7 +33,7 @@ def create_default_file()
   @env_vars.each { |r| 
      c << r[1]  << ' ' << r[2] << "\n" unless !r[2]
   }
-  c << "hostname ${hostname}\n</store>"
+  c << "</store>"
 
   File.open(file_name, 'w') { |f| f.write(c) }
 end
