@@ -217,6 +217,10 @@ else
     umount /var/lib/docker/containers/*/shm || :
 fi
 
+if [[ $USE_REMOTE_SYSLOG ]] ; then
+    ruby generate_syslog_config.rb
+fi
+
 if [[ $DEBUG ]] ; then
     exec fluentd $fluentdargs > /var/log/fluentd.log 2>&1
 else
