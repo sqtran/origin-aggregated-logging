@@ -32,7 +32,7 @@ def create_default_file()
   @env_vars.each { |r| 
      c << r[1]  << ' ' << r[2] << "\n" unless !r[2]
   }
-  c << '</store>'
+  c << "hostname ${hostname}\n</store>"
 
   File.open(file_name, 'w') { |f| f.write(c) }
 end
