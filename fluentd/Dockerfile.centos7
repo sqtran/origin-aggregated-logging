@@ -34,7 +34,6 @@ RUN mkdir -p ${HOME} && \
      'elasticsearch-api:<5' \
      'elasticsearch:<5' \
       fluentd:${FLUENTD_VERSION} \
-     'fluent-plugin-elasticsearch:>1.9.2' \
       fluent-plugin-kubernetes_metadata_filter \
       fluent-plugin-rewrite-tag-filter \
       fluent-plugin-secure-forward \
@@ -42,6 +41,10 @@ RUN mkdir -p ${HOME} && \
       fluent-plugin-viaq_data_model \
      'fluent-plugin-remote-syslog:1.1' \
       systemd-journal 
+
+RUN curl -s https://github.com/ViaQ/fluent-plugin-elasticsearch/releases/download/v1.9.5.1/fluent-plugin-elasticsearch-1.9.5.1.gem > ${HOME}/fluent-plugin-elasticsearch-1.9.5.1.gem && \
+    cd ${HOME} && \
+    gem install -N --conservative --minimal-deps --no-ri --local fluent-plugin-elasticsearch-1.9.5.1.gem
 
 ADD configs.d/ /etc/fluent/configs.d/
 ADD run.sh generate_throttle_configs.rb ${HOME}/
