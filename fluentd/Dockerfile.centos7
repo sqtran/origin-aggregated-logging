@@ -42,7 +42,6 @@ RUN mkdir -p ${HOME} && mkdir -p /etc/fluent/plugin && \
      'fluent-plugin-remote-syslog:1.1' \
       systemd-journal 
 
-ADD plugin/ /etc/fluent/plugin/
 ADD configs.d/ /etc/fluent/configs.d/
 ADD run.sh generate_throttle_configs.rb generate_syslog_config.rb ${HOME}/
 
