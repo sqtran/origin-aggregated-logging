@@ -228,6 +228,8 @@ fi
 
 if [[ $USE_REMOTE_SYSLOG ]] ; then
     ruby generate_syslog_config.rb
+    # workaround for issue where fluentd cannot find this plugin when installed via "gem install"
+    ln -s /opt/app-root/src/gems/fluent-plugin-remote-syslog*/lib/fluentd/plugin/*.rb /etc/fluent/plugin/
 fi
 
 if [[ $DEBUG ]] ; then
