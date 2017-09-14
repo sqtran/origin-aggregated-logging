@@ -218,9 +218,11 @@ else
 fi
 
 if [[ $USE_REMOTE_SYSLOG ]] ; then
-    ruby generate_syslog_config.rb
-    # workaround for issue where fluentd cannot find this plugin when installed via "gem install"
+    # The symlink is a workaround for https://github.com/openshift/origin-aggregated-logging/issues/604
     ln -s /opt/app-root/src/gems/fluent-plugin-remote-syslog*/lib/fluentd/plugin/*.rb /etc/fluent/plugin/
+    if [[ $REMOTE_SYSLOG_HOST ]] ; then
+        ruby generate_syslog_config.rb
+    fi
 fi
 
 if [[ $DEBUG ]] ; then
