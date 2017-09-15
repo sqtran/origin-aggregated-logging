@@ -47,6 +47,7 @@ RUN curl -L -s https://github.com/ViaQ/fluent-plugin-elasticsearch/releases/down
     cd ${HOME} && \
     gem install -N --conservative --minimal-deps --no-ri --local fluent-plugin-elasticsearch-1.9.5.1.gem
 
+ADD plugin/ /etc/fluent/plugin/
 ADD configs.d/ /etc/fluent/configs.d/
 ADD run.sh generate_throttle_configs.rb generate_syslog_config.rb ${HOME}/
 
