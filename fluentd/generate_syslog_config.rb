@@ -9,14 +9,17 @@ def init_environment_vars()
   group  = prefix + "HOST"
 
   ENV.each_key.to_a.select { |s| s.start_with? group }.uniq.each do |k|
+    # [0] = environment variable name
+    # [1] = syslog plugin config name
+    # [2] = default value, if any
     vars = [
       ['HOST', 'remote_syslog', nil],
-      ['PORT', 'port', nil],
+      ['PORT', 'port', "514"],
       ['HOSTNAME', 'hostname', ENV['HOSTNAME']],
       ['REMOVE_TAG_PREFIX', 'remove_tag_prefix', nil],
       ['TAG_KEY', 'tag_key', nil],
-      ['FACILITY', 'facility', nil],
-      ['SEVERITY', 'severity', nil],
+      ['FACILITY', 'facility', "local0"],
+      ['SEVERITY', 'severity', "debug"],
       ['USE_RECORD', 'use_record', nil],
       ['PAYLOAD_KEY', 'payload_key', nil]
     ]
