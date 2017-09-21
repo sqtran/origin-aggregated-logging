@@ -6,7 +6,7 @@ EXPOSE 9200
 EXPOSE 9300
 USER 0
 
-ENV ES_CLOUD_K8S_VER=2.4.4 \
+ENV ES_CLOUD_K8S_VER=2.4.4_01 \
     ES_CONF=/usr/share/java/elasticsearch/config \
     ES_JAVA_OPTS="-Dmapper.allow_dots_in_name=true" \
     ES_HOME=/usr/share/java/elasticsearch \
@@ -15,15 +15,15 @@ ENV ES_CLOUD_K8S_VER=2.4.4 \
     INSTANCE_RAM=512G \
     JAVA_VER=1.8.0 \
     NODE_QUORUM=1 \
-    OSE_ES_VER=2.4.4.11 \
+    OSE_ES_VER=2.4.4.13 \
     PLUGIN_LOGLEVEL=INFO \
     RECOVER_AFTER_NODES=1 \
     RECOVER_EXPECTED_NODES=1 \
     RECOVER_AFTER_TIME=5m \
     RELEASE_STREAM=prod
 
-ARG ES_CLOUD_K8S_VER=2.4.4
-ARG OSE_ES_VER=2.4.4.9
+ARG ES_CLOUD_K8S_VER=2.4.4_01
+ARG OSE_ES_VER=2.4.4.13
 ARG ES_CLOUD_K8S_URL
 ARG OSE_ES_URL
 
@@ -34,8 +34,8 @@ LABEL io.k8s.description="Elasticsearch container for EFK aggregated logging sto
       com.redhat.component=logging-elasticsearch-docker \
       architecture=x86_64 \
       name="openshift3/logging-elasticsearch" \
-      version="3.6.0" \
-      release="1"
+      version="v3.7.0" \
+      release="0.123.0.0"
 
 RUN yum-config-manager --enable rhel-7-server-ose-3.6-rpms \
                    --enable rhel-7-server-extras-rpms  && \

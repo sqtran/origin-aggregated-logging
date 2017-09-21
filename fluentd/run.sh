@@ -69,6 +69,8 @@ if [ "${USE_MUX:-}" = "true" ] ; then
         fi
     done
     rm -f $CFG_DIR/dynamic/input-docker-* $CFG_DIR/dynamic/input-syslog-*
+    # mux is a normalizer
+    export PIPELINE_TYPE=normalizer
 else
     ruby generate_throttle_configs.rb
     rm -f $CFG_DIR/openshift/*mux*.conf
@@ -93,31 +95,132 @@ if [ -n "${MUX_CLIENT_MODE:-}" ] ; then
         # sed assumes CONTAINER_ fields are neither first nor last fields in list
         K8S_FILTER_REMOVE_KEYS=$( echo $K8S_FILTER_REMOVE_KEYS | \
                                   sed -e 's/,CONTAINER_NAME,/,/g' -e 's/,CONTAINER_ID_FULL,/,/g' )
+        # tell the viaq filter not to construct an elasticsearch index name
+        # for project because we have no kubernetes metadata yet
     fi
     cp $CFG_DIR/filter-pre-mux-client.conf $CFG_DIR/openshift/$mux_client_filename
     # copy any user defined files, possibly overwriting the standard ones
     if [ -f $CFG_DIR/user/filter-pre-mux-client.conf ] ; then
         cp -f $CFG_DIR/user/filter-pre-mux-client.conf $CFG_DIR/openshift/$mux_client_filename
     fi
-    # rm k8s meta plugin - do not hit the API server
+    # rm k8s meta plugin - do not hit the API server - just do json parsing
     if [ "${MUX_CLIENT_MODE:-}" = maximal -o "${MUX_CLIENT_MODE:-}" = minimal ] ; then
-        rm $CFG_DIR/openshift/filter-k8s-meta.conf
-        touch $CFG_DIR/openshift/filter-k8s-meta.conf
+        cp -f $CFG_DIR/filter-k8s-meta-for-mux-client.conf $CFG_DIR/openshift/filter-k8s-meta.conf
     fi
+    # mux clients do not create elasticsearch index names
+    ENABLE_ES_INDEX_NAME=false
 else
     rm -f $CFG_DIR/openshift/filter-pre-mux-client.conf $CFG_DIR/openshift/output-pre-mux-client.conf
 fi
-export K8S_FILTER_REMOVE_KEYS
+export K8S_FILTER_REMOVE_KEYS ENABLE_ES_INDEX_NAME
+
+if [ -z $ES_HOST ]; then
+    echo "ERROR: Environment variable ES_HOST for Elasticsearch host name is not set."
+    exit 1
+fi
+if [ -z $ES_PORT ]; then
+    echo "ERROR: Environment variable ES_PORT for Elasticsearch port number is not set."
+    exit 1
+fi
+
+OPS_COPY_HOST="${OPS_COPY_HOST:-$ES_COPY_HOST}"
+OPS_COPY_PORT="${OPS_COPY_PORT:-$ES_COPY_PORT}"
+OPS_COPY_SCHEME="${OPS_COPY_SCHEME:-$ES_COPY_SCHEME}"
+OPS_COPY_CLIENT_CERT="${OPS_COPY_CLIENT_CERT:-$ES_COPY_CLIENT_CERT}"
+OPS_COPY_CLIENT_KEY="${OPS_COPY_CLIENT_KEY:-$ES_COPY_CLIENT_KEY}"
+OPS_COPY_CA="${OPS_COPY_CA:-$ES_COPY_CA}"
+OPS_COPY_USERNAME="${OPS_COPY_USERNAME:-$ES_COPY_USERNAME}"
+OPS_COPY_PASSWORD="${OPS_COPY_PASSWORD:-$ES_COPY_PASSWORD}"
+export OPS_COPY_HOST OPS_COPY_PORT OPS_COPY_SCHEME OPS_COPY_CLIENT_CERT \
+       OPS_COPY_CLIENT_KEY OPS_COPY_CA OPS_COPY_USERNAME OPS_COPY_PASSWORD
+
+# Check the existing main fluent.conf has the @OUTPUT label
+# If it exists, we could use the label and take advantage.
+# If not, give up one output tag per plugin for now.
+output_label=$( egrep "<label @OUTPUT>" $CFG_DIR/../fluent.conf || : )
+if [ "$output_label" = "" ]; then
+    echo "WARNING: There is no @OUTPUT label declared in /etc/fluent/fluent.conf."
+    echo "         Disabling \"One output tag per plugin feature\" in this deployment."
+    echo "         To enable it, please set <label @OUTPUT> just before the output section."
+fi
 
 # How many outputs?
 if [ -n "${MUX_CLIENT_MODE:-}" ] ; then
     # A fluentd collector configured as a mux client has just one output: sending to a mux.
     NUM_OUTPUTS=1
+    if [ "$ES_COPY" = "true" ] ; then
+        echo "WARNING: When MUX_CLIENT_MODE is set, logs are forwarded to MUX; COPY won't work with it."
+    fi
+    rm -f $CFG_DIR/openshift/filter-post-z-retag-*.conf
+    if [ "$output_label" != "" ]; then
+        cp $CFG_DIR/{,openshift}/filter-post-z-mux-client.conf
+    fi
 else
-    # fluentd usually has 2 outputs.
-    NUM_OUTPUTS=2
+    # check ES_HOST vs. OPS_HOST; ES_PORT vs. OPS_PORT
+    if [ "$ES_HOST" = ${OPS_HOST:-""} -a $ES_PORT -eq ${OPT_PORT:-0} ]; then
+        # There is one output Elasticsearch
+        NUM_OUTPUTS=1
+        # Disable "output-es-ops-config.conf in output-operations.conf"
+        echo > $CFG_DIR/dynamic/output-es-ops-config.conf
+        rm -f $CFG_DIR/openshift/filter-post-z-retag-*.conf $CFG_DIR/openshift/filter-post-mux-client.conf
+        if [ "$output_label" != "" ]; then
+            cp $CFG_DIR/{,openshift}/filter-post-z-retag-one.conf
+        fi
+    else
+        NUM_OUTPUTS=2
+        # Enable "output-es-ops-config.conf in output-operations.conf"
+        cp $CFG_DIR/{openshift,dynamic}/output-es-ops-config.conf
+        rm -f $CFG_DIR/openshift/filter-post-z-retag-*.conf $CFG_DIR/openshift/filter-post-mux-client.conf
+        if [ "$output_label" != "" ]; then
+            cp $CFG_DIR/{,openshift}/filter-post-z-retag-two.conf
+        fi
+    fi
+    # Retagging tags into one to avoid buffer chunk switch (except mux.** and **.fluentd)
     if [ "$ES_COPY" = "true" ]; then
-        NUM_OUTPUTS=`expr $NUM_OUTPUTS \* 2`
+        if [ -z $ES_COPY_HOST ]; then
+            echo "ERROR: Although ES_COPY is true, the environment variable ES_COPY_HOST for Elasticsearch host name is not set."
+            exit 1
+        fi
+        if [ -z $ES_COPY_PORT ]; then
+            echo "ERROR: Although ES_COPY is true, the environment variable ES_COPY_PORT for Elasticsearch port number is not set."
+            exit 1
+        fi
+        if [ "$ES_HOST" = "$ES_COPY_HOST" -a $ES_PORT -eq $ES_COPY_PORT ]; then
+            echo "WARNING: The environment variable pair ES_COPY_HOST and ES_COPY_PORT is identical to the primary pair ($ES_HOST, $ES_PORT).  Disabling the copy."
+            # create empty files for the ES copy config
+            echo > $CFG_DIR/dynamic/es-copy-config.conf
+        else
+            NUM_OUTPUTS=`expr $NUM_OUTPUTS + 1`
+            # user wants to split the output of fluentd into two different elasticsearch
+            # user will provide the necessary COPY environment variables as above
+            if [ -s $CFG_DIR/user/es-copy-config.conf ]; then
+                cp $CFG_DIR/{user,dynamic}/es-copy-config.conf
+            else
+                cp $CFG_DIR/{openshift,dynamic}/es-copy-config.conf
+            fi
+            if [ "${SET_ES_COPY_HOST_ALIAS:-false}" = "true" ]; then
+                es_ip_host=$( getent hosts $ES_HOST )
+                echo $es_ip_host $ES_COPY_HOST >> /etc/hosts
+            fi
+        fi
+        if [ ${OPS_HOST:-""} = "$OPS_COPY_HOST" -a $OPS_PORT -eq $OPS_COPY_PORT ]; then
+            echo "WARNING: The environment variable pair OPS_COPY_HOST and OPS_COPY_PORT is identical to the primary pair ($OPS_HOST, $OPS_PORT).  Disabling the copy."
+            # create empty files for the ES copy config
+            echo > $CFG_DIR/dynamic/es-ops-copy-config.conf
+        else
+            NUM_OUTPUTS=`expr $NUM_OUTPUTS + 1`
+            # user wants to split the output of fluentd into two different elasticsearch
+            # user will provide the necessary COPY environment variables as above
+            if [ -s $CFG_DIR/user/es-ops-copy-config.conf ]; then
+                cp $CFG_DIR/{user,dynamic}/es-ops-copy-config.conf
+            else
+                cp $CFG_DIR/{openshift,dynamic}/es-ops-copy-config.conf
+            fi
+            if [ "${SET_ES_COPY_HOST_ALIAS:-false}" = "true" ]; then
+                es_ip_host=$( getent hosts $OPS_HOST )
+                echo $es_ip_host $OPS_COPY_HOST >> /etc/hosts
+            fi
+        fi
     fi
 fi
 
@@ -125,10 +228,13 @@ fi
 FILE_BUFFER_PATH=/var/lib/fluentd
 mkdir -p $FILE_BUFFER_PATH
 
-# Get the available disk size; use 1/4 of it
+# Get the available disk size.
 DF_LIMIT=$(df -B1 $FILE_BUFFER_PATH | grep -v Filesystem | awk '{print $2}')
 DF_LIMIT=${DF_LIMIT:-0}
-DF_LIMIT=$(expr $DF_LIMIT / 4) || :
+if [ "$MUX_FILE_BUFFER_STORAGE_TYPE" = "hostmount" ]; then
+    # Use 1/4 of the disk space for hostmount.
+    DF_LIMIT=$(expr $DF_LIMIT / 4) || :
+fi
 if [ $DF_LIMIT -eq 0 ]; then
     echo "ERROR: No disk space is available for file buffer in $FILE_BUFFER_PATH."
     exit 1
@@ -160,31 +266,6 @@ if [ -z $BUFFER_QUEUE_LIMIT -o $BUFFER_QUEUE_LIMIT -eq 0 ]; then
     exit 1
 fi
 export BUFFER_QUEUE_LIMIT BUFFER_SIZE_LIMIT
-
-OPS_COPY_HOST="${OPS_COPY_HOST:-$ES_COPY_HOST}"
-OPS_COPY_PORT="${OPS_COPY_PORT:-$ES_COPY_PORT}"
-OPS_COPY_SCHEME="${OPS_COPY_SCHEME:-$ES_COPY_SCHEME}"
-OPS_COPY_CLIENT_CERT="${OPS_COPY_CLIENT_CERT:-$ES_COPY_CLIENT_CERT}"
-OPS_COPY_CLIENT_KEY="${OPS_COPY_CLIENT_KEY:-$ES_COPY_CLIENT_KEY}"
-OPS_COPY_CA="${OPS_COPY_CA:-$ES_COPY_CA}"
-OPS_COPY_USERNAME="${OPS_COPY_USERNAME:-$ES_COPY_USERNAME}"
-OPS_COPY_PASSWORD="${OPS_COPY_PASSWORD:-$ES_COPY_PASSWORD}"
-export OPS_COPY_HOST OPS_COPY_PORT OPS_COPY_SCHEME OPS_COPY_CLIENT_CERT \
-       OPS_COPY_CLIENT_KEY OPS_COPY_CA OPS_COPY_USERNAME OPS_COPY_PASSWORD
-
-if [ "$ES_COPY" = "true" -a -z "${MUX_CLIENT_MODE:-}" ] ; then
-    # user wants to split the output of fluentd into two different elasticsearch
-    # user will provide the necessary COPY environment variables as above
-    cp $CFG_DIR/{openshift,dynamic}/es-copy-config.conf
-    cp $CFG_DIR/{openshift,dynamic}/es-ops-copy-config.conf
-else
-    if [ "$ES_COPY" = "true" ] ; then
-        echo "WARNING: When MUX_CLIENT_MODE is set, logs are forwarded to MUX; COPY won't work with it."
-    fi
-    # create empty files for the ES copy config
-    echo > $CFG_DIR/dynamic/es-copy-config.conf
-    echo > $CFG_DIR/dynamic/es-ops-copy-config.conf
-fi
 
 # http://docs.fluentd.org/v0.12/articles/monitoring
 if [ "${ENABLE_MONITOR_AGENT:-}" = true ] ; then

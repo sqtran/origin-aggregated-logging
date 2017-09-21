@@ -3,7 +3,7 @@
 # This is a test suite for the MUX_CLIENT_MODE settings
 
 source "$(dirname "${BASH_SOURCE[0]}" )/../hack/lib/init.sh"
-source "${OS_O_A_L_DIR}/deployer/scripts/util.sh"
+source "${OS_O_A_L_DIR}/hack/testing/util.sh"
 os::util::environment::use_sudo
 
 os::test::junit::declare_suite_start "test/curator"
@@ -49,11 +49,12 @@ cleanup() {
     fi
     if [ -n "${saveds:-}" ] ; then
         if [ -f "${saveds:-}" ]; then
-            os::log::debug "$( oc replace -f $saveds )"
+            os::log::debug "$( oc replace --force -f $saveds )"
             rm -f $saveds
         fi
     fi
     os::log::debug "$( oc label node --all logging-infra-fluentd=true || : )"
+    os::cmd::try_until_text "oc get pods -l component=fluentd" "^logging-fluentd-.* Running "
     # this will call declare_test_end, suite_end, etc.
     os::test::junit::reconcile_output
     exit $return_code
@@ -106,4 +107,3 @@ os::cmd::try_until_text "oc get pods -l component=fluentd" "^logging-fluentd-.* 
 fpod=`get_running_pod fluentd`
 wait_for_fluentd_ready
 wait_for_fluentd_to_catch_up
-

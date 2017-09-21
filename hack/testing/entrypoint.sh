@@ -19,10 +19,57 @@
 #  - JUNIT_REPORT: generate a jUnit XML report for tests
 
 source "$(dirname "${BASH_SOURCE[0]}" )/../lib/init.sh"
-source "${OS_O_A_L_DIR}/deployer/scripts/util.sh"
+source "${OS_O_A_L_DIR}/hack/testing/util.sh"
+
+# HACK HACK HACK
+# richm 2017-09-18 rsyslog is rate limiting the journal when running
+# with json-file - messages show up in the journal but not in
+# /var/log/messages - increase the limits for testing
+if docker_uses_journal ; then
+    os::log::info docker uses journal, skipping
+else
+    os::log::info docker uses json-file - increase rate limits for rsyslog
+    restart=
+    if sudo grep -q -i '^[$]IMJournalRatelimitInterval' /etc/rsyslog.conf ; then
+        os::log::info Keeping limit $( sudo grep -i '^[$]IMJournalRatelimitInterval' /etc/rsyslog.conf )
+    else
+        # default is 600, so increase by a factor of 10
+        sudo sed -i '/^[$]IMJournalStateFile/a\
+$IMJournalRatelimitInterval 60' /etc/rsyslog.conf
+        restart=1
+    fi
+    if sudo grep -q -i '^[$]IMJournalRatelimitBurst' /etc/rsyslog.conf ; then
+        os::log::info Keeping limit $( sudo grep -i '^[$]IMJournalRatelimitBurst' /etc/rsyslog.conf )
+    else
+        # default is 20000
+        sudo sed -i '/^[$]IMJournalStateFile/a\
+$IMJournalRatelimitBurst 20000' /etc/rsyslog.conf
+        restart=1
+    fi
+    if [ -n "$restart" ] ; then
+        sudo systemctl restart rsyslog
+    fi
+fi
+
+# HACK HACK HACK
+# There seems to be some sort of performance problem - richm 2017-08-15
+# not sure what has changed, but now running an all-in-one for CI, with both
+# openshift master and node running as systemd services logging to the journal
+#, and the default/logging pods, and the os, are spewing too much for fluentd
+# to keep up with when it has 100m cpu (default), on a aws m4.xlarge system
+# for now, remove the limits on fluentd to unblock the tests
+oc get -n logging daemonset/logging-fluentd -o yaml > "${ARTIFACT_DIR}/logging-fluentd-orig.yaml"
+if [ -z "${USE_DEFAULT_FLUENTD_CPU_LIMIT:-}" ] ; then
+    oc patch -n logging daemonset/logging-fluentd --type=json --patch '[
+          {"op":"remove","path":"/spec/template/spec/containers/0/resources/limits/cpu"}]'
+fi
 
 # start a fluentd performance monitor
 monitor_fluentd_top() {
+    # assumes running in a subshell
+    cp $KUBECONFIG $ARTIFACT_DIR/monitor_fluentd_top.kubeconfig
+    export KUBECONFIG=$ARTIFACT_DIR/monitor_fluentd_top.kubeconfig
+    oc project logging > /dev/null
     while true ; do
         fpod=$( get_running_pod fluentd )
         if [ -n "$fpod" ] ; then
@@ -80,13 +127,9 @@ if [[ -n "${JUNIT_REPORT:-}" ]]; then
 	export JUNIT_REPORT_OUTPUT="${LOG_DIR}/raw_test_output.log"
 fi
 
+# if there is a script that is expected to fail, add it here
 expected_failures=(
-	"test-fluentd-forward"
-	"test-json-parsing"
-	"test-es-copy"
-	"test-mux"
-	"test-upgrade"
-	"test-viaq-data-model"
+    NONE
 )
 
 function run_suite() {
@@ -98,7 +141,7 @@ function run_suite() {
 	os::test::junit::declare_suite_end
 
 	os::log::info "Logging test suite ${suite_name} started at $( date )"
-	ops_cluster="true"
+	ops_cluster=${ENABLE_OPS_CLUSTER:-"true"}
 	if "${test}" "${ops_cluster}"; then
 		os::log::info "Logging test suite ${suite_name} succeeded at $( date )"
 		if grep -q "${suite_name}" <<<"${expected_failures[@]}"; then
