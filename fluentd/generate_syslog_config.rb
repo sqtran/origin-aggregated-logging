@@ -41,7 +41,7 @@ def create_default_file()
 <store>
 @type syslog_buffered
 "
-     r.each { |v|  c << v[1]  << ' ' << v[2] << "\n" unless !v[2] }
+     r.each { |v|  c << "#{v[1]} #{v[2]}\n" unless !v[2] }
   c <<
 "</store>
 "
